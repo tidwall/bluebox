@@ -706,6 +706,8 @@ int neco_main(int argc, char *argv[]) {
 
     setmaxulimit();
 
+    printf("method: %s\n", neco_switch_method());
+
     struct server server = { 0 };
     server.cmds = hashmap_new_with_allocator(xmalloc, xrealloc, xfree,
         sizeof(struct cmd), 0, 0, 0, cmdhash, cmdcompare, 0, 0);
