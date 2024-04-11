@@ -1,7 +1,7 @@
 import github.com/tidwall/hashmap.c v0.8.0
-import github.com/tidwall/neco v0.1.2
+import github.com/tidwall/neco v0.1.3
 
 sum 3181a7786467f458e54797154e09f347f91f07a6  hashmap.c
 sum 62f54693f2d375d78e4fa92b6d9fc0e8796f1347  hashmap.h
-sum f2ad78069b00fd504d64085bccf14ba1d03a635f  neco.c
+sum 5dbf5efb634acfad2caefc35660fd5a551d588dc  neco.c
 sum b90205a931fa43e221fd93194e97e6f3ebf80b8b  neco.h
