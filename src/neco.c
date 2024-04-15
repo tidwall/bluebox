@@ -29,6 +29,10 @@ NECO_NOPOOL           // Do not use a coroutine and channel pools
 NECO_USEHEAPSTACK     // Allocate stacks on the heap using malloc
 NECO_NOSIGNALS        // Disable signal handling
 NECO_NOWORKERS        // Disable all worker threads, work will run in coroutine
+NECO_USEREADWORKERS   // Use read workers, disabled by default
+NECO_USEWRITEWORKERS  // Use write workers, enabled by default on Linux
+NECO_NOREADWORKERS    // Disable all read workers
+NECO_NOWRITEWORKERS   // Disable all write workers
 */
 
 // Windows and Webassembly have limited features.
@@ -52,6 +56,12 @@ NECO_NOWORKERS        // Disable all worker threads, work will run in coroutine
 #define DEF_MAXWORKERS    64
 #define DEF_MAXRINGSIZE   32
 #define DEF_MAXIOWORKERS  2
+#endif
+
+#ifdef __linux__
+#ifndef NECO_USEWRITEWORKERS
+#define NECO_USEWRITEWORKERS
+#endif
 #endif
 
 #ifndef NECO_STACKSIZE
@@ -88,6 +98,7 @@ NECO_NOWORKERS        // Disable all worker threads, work will run in coroutine
 #define NECO_BURST 1
 #endif
 #endif
+
 
 // The following is only needed when LLCO_NOASM or LLCO_STACKJMP is defined.
 // This same block is duplicated in the llco.c block below.
@@ -2831,8 +2842,10 @@ bool worker_submit(struct worker *worker, int64_t pin, void(*work)(void *udata),
 #include <netinet/in.h>
 #include <sys/un.h>
 #include <dlfcn.h>
+#include <sys/syscall.h>
 #endif
 #include <pthread.h>
+
 
 #include "neco.h"
 
@@ -3657,9 +3670,8 @@ static int is_main_thread(void) {
     return IsGUIThread(false);
 }
 #elif defined(__linux__) || defined(__EMSCRIPTEN__) 
-int gettid(void);
 static int is_main_thread(void) {
-    return getpid() == gettid();
+    return getpid() == (pid_t)syscall(SYS_gettid);
 }
 #else
 int pthread_main_np(void);
@@ -4985,7 +4997,8 @@ static void cowait(int fd, enum evkind kind, int64_t deadline) {
 // Networking code
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef NECO_NOWORKERS
+#if !defined(NECO_NOWORKERS) && defined(NECO_USEREADWORKERS) && \
+    !defined(NECO_NOREADWORKERS)
 
 struct ioread {
     int fd;
@@ -5009,7 +5022,7 @@ static void ioread(void *udata) {
 
 static ssize_t read1(int fd, void *data, size_t nbytes) {
     ssize_t n;
-    bool nowork = false;
+    bool nowork = true;
 #ifdef NECO_TESTING
     if (neco_fail_read_counter > 0) {
         nowork = true;
@@ -5147,7 +5160,8 @@ static ssize_t write1(int fd, const void *data, size_t nbytes) {
 #define write2 write1
 #endif
 
-#ifndef NECO_NOWORKERS
+#if !defined(NECO_NOWORKERS) && defined(NECO_USEWRITEWORKERS) && \
+    !defined(NECO_NOWRITEWORKERS)
 struct iowrite {
     int fd;
     const void *data;
