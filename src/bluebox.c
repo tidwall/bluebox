@@ -431,7 +431,8 @@ err_invalid_multibulk_length:
 static bool client_write_raw(struct client *client, const void *data, 
     size_t nbytes)
 {
-    return neco_stream_write(client->stream, (void*)data, nbytes) == nbytes;
+    ssize_t ret = neco_stream_write(client->stream, (void*)data, nbytes);
+    return ret == (ssize_t)nbytes;
 }
 
 static bool client_write_cstr(struct client *client, const char *cstr) {
