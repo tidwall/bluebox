@@ -567,7 +567,6 @@ static bool cmdSET(struct client *client, struct server *server,
     if (nargs != 3) {
         return client_write_err_wrong_num_args(client, args[0]);
     }
-    if (0) {
     struct key key = { 
         .key = args[1],
         .value = args[2],
@@ -578,7 +577,6 @@ static bool cmdSET(struct client *client, struct server *server,
     if (prev) {
         bulk_release(prev->key);
         bulk_release(prev->value);
-    }
     }
     return client_write_ok(client);
 }
