@@ -567,6 +567,7 @@ static bool cmdSET(struct client *client, struct server *server,
     if (nargs != 3) {
         return client_write_err_wrong_num_args(client, args[0]);
     }
+    if (0) {
     struct key key = { 
         .key = args[1],
         .value = args[2],
@@ -577,6 +578,7 @@ static bool cmdSET(struct client *client, struct server *server,
     if (prev) {
         bulk_release(prev->key);
         bulk_release(prev->value);
+    }
     }
     return client_write_ok(client);
 }
@@ -692,16 +694,76 @@ void setmaxulimit(void) {
     }
 }
 
-int neco_main(int argc, char *argv[]) {
+static void tcp_listener(int argc, void *argv[]) {
+    struct server *server = argv[0];
+    int port = *(int*)argv[1];
+    char addr[64];
+    snprintf(addr, sizeof(addr), "0.0.0.0:%d", port);
+    int sockfd = neco_serve("tcp", addr);
+    if (sockfd == -1) {
+        perror("neco_serve");
+        exit(1);
+    }
+    neco_start(costats, 0);
+    printf("Started BlueBox on port %d\n", port);
+    while (1) {
+        int fd = neco_accept(sockfd, 0, 0);
+        if (fd == -1) {
+            perror("accept");
+        } else {
+            int err = neco_start(coclient, 2, server, &fd);
+            if (err != NECO_OK) {
+                printf("start: %s\n", neco_strerror(err));
+            }
+        }
+    }
+
+}
+
+static void unixsocket_listener(int argc, void *argv[]) {
+    struct server *server = argv[0];
+    char *unixsocket = argv[1];
+    unlink(unixsocket);
+    int sockfd = neco_serve("unix", unixsocket);
+    if (sockfd == -1) {
+        perror("neco_serve");
+        exit(1);
+    }
+    neco_start(costats, 0);
+    printf("Started BlueBox on socket %s\n", unixsocket);
+    while (1) {
+        int fd = neco_accept(sockfd, 0, 0);
+        if (fd == -1) {
+            perror("accept");
+        } else {
+            int err = neco_start(coclient, 2, server, &fd);
+            if (err != NECO_OK) {
+                printf("start: %s\n", neco_strerror(err));
+            }
+        }
+    }
+}
+
+int main(int argc, char *argv[]) {
     int port = 9999;
+    char *unixsocket = 0;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--port") == 0) {
+        if (strcmp(argv[i], "--port") == 0 || strcmp(argv[i], "-p") == 0) {
             i++;
             if (i == argc) {
                 fprintf(stderr, "missing port\n");
                 exit(1);
             }
             port = atoi(argv[i]);
+        } else if (strcmp(argv[i], "--unixsocket") == 0 || 
+            strcmp(argv[i], "-s") == 0)
+        {
+            i++;
+            if (i == argc) {
+                fprintf(stderr, "missing socket file path\n");
+                exit(1);
+            }
+            unixsocket = argv[i];
         }
     }
 
@@ -722,27 +784,14 @@ int neco_main(int argc, char *argv[]) {
     hashmap_set(server.cmds, &(struct cmd){ .name = "quit", .func = cmdQUIT });
     hashmap_set(server.cmds, &(struct cmd){ .name = "dbsize", .func = cmdDBSIZE });
     hashmap_set(server.cmds, &(struct cmd){ .name = "keys", .func = cmdKEYS });
-    
-    char addr[64];
-    snprintf(addr, sizeof(addr), "0.0.0.0:%d", port);
-    int sockfd = neco_serve("tcp", addr);
-    if (sockfd == -1) {
-        perror("neco_serve");
-        exit(1);
-    }
-    neco_start(costats, 0);
 
-    printf("Started BlueBox on port %d\n", port);
+    neco_start(tcp_listener, 2, &server, &port);
+    if (unixsocket) {
+        neco_start(unixsocket_listener, 2, &server, unixsocket);
+    }
     while (1) {
-        int fd = neco_accept(sockfd, 0, 0);
-        if (fd == -1) {
-            perror("accept");
-        } else {
-            int err = neco_start(coclient, 2, &server, &fd);
-            if (err != NECO_OK) {
-                printf("start: %s\n", neco_strerror(err));
-            }
-        }
+        // sleep forever
+        neco_sleep(NECO_HOUR);
     }
     return 0;
 }

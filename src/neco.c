@@ -97,8 +97,15 @@ NECO_NOWRITEWORKERS   // Disable all write workers
 #undef NECO_BURST
 #define NECO_BURST 1
 #endif
+#if NECO_MAXWORKERS > 8
+#undef NECO_MAXWORKERS
+#define NECO_MAXWORKERS 8
 #endif
-
+#if NECO_MAXRINGSIZE > 4
+#undef NECO_MAXRINGSIZE
+#define NECO_MAXRINGSIZE 4
+#endif
+#endif
 
 // The following is only needed when LLCO_NOASM or LLCO_STACKJMP is defined.
 // This same block is duplicated in the llco.c block below.
@@ -137,6 +144,7 @@ NECO_NOWRITEWORKERS   // Disable all write workers
 
 #define SCO_STATIC
 #define STACK_STATIC
+#define WORKER_STATIC
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -2000,11 +2008,11 @@ static void sco_entry(void *udata) {
     co->prev = co;
     co->next = co;
     if (sco_cur) {
-        // Reschedule the coroutine that started this one
-        sco_list_push_back(&sco_yielders, co);
-        sco_list_push_back(&sco_yielders, sco_cur);
-        sco_nyielders += 2;
-        sco_switch(false, false);
+        // Reschedule the coroutine that started this one immediately after
+        // all running coroutines, but before any yielding coroutines, and
+        // continue running the started coroutine.
+        sco_list_push_back(&sco_runners, sco_cur);
+        sco_nrunners++;
     }
     sco_cur = co;
     if (sco_user_entry) {
@@ -2623,6 +2631,12 @@ void *stack_addr(struct stack *stack) {
 #include <string.h>
 #include <pthread.h>
 
+#ifdef WORKER_STATIC
+#define WORKER_API static
+#else
+#define WORKER_API
+#endif
+
 #define WORKER_DEF_TIMEOUT INT64_C(1000000000) // one second
 #define WORKER_DEF_MAX_THREADS 2
 #define WORKER_DEF_MAX_THREAD_ENTRIES 32
@@ -2657,6 +2671,7 @@ struct worker {
     void (*free)(void*);
 };
 
+WORKER_API
 void worker_free(struct worker *worker) {
     if (worker) {
         if (worker->threads) {
@@ -2681,6 +2696,7 @@ void worker_free(struct worker *worker) {
     }
 }
 
+WORKER_API
 struct worker *worker_new(struct worker_opts *opts) {
     // Load options
     int nthreads = opts ? opts->max_threads : 0;
@@ -2775,6 +2791,7 @@ static void *worker_entry(void *arg) {
 /// @param udata any user data
 /// @return true for success or false if no worker is available. 
 /// @return false for invalid arguments. Worker and work must no be null.
+WORKER_API
 bool worker_submit(struct worker *worker, int64_t pin, void(*work)(void *udata),
     void *udata)
 {
@@ -3670,9 +3687,14 @@ static struct coroutine *evexists(int fd, enum evkind kind) {
 static int is_main_thread(void) {
     return IsGUIThread(false);
 }
-#elif defined(__linux__) || defined(__EMSCRIPTEN__) 
+#elif defined(__linux__)
 static int is_main_thread(void) {
     return getpid() == (pid_t)syscall(SYS_gettid);
+}
+#elif defined(__EMSCRIPTEN__) 
+int gettid(void);
+static int is_main_thread(void) {
+    return getpid() == gettid();
 }
 #else
 int pthread_main_np(void);
@@ -7055,6 +7077,7 @@ int neco_serve(const char *network, const char *address) {
 ////////////////////////////////////////////////////////////////////////////////
 
 struct neco_mutex {
+    _Alignas(16)         // needed for opaque type alias
     int64_t rtid;        // runtime id
     bool locked;         // mutex is locked (read or write)
     int  rlocked;        // read lock counter
@@ -7063,6 +7086,7 @@ struct neco_mutex {
 
 
 static_assert(sizeof(neco_mutex) >= sizeof(struct neco_mutex), "");
+static_assert(_Alignof(neco_mutex) == _Alignof(struct neco_mutex), "");
 
 static int mutex_init(neco_mutex *mutex) {
     struct neco_mutex *mu = (void*)mutex;
@@ -7313,12 +7337,14 @@ int neco_mutex_destroy(neco_mutex *mutex) {
 }
 
 struct neco_waitgroup {
-    int64_t rtid;
-    int count;
-    struct colist queue;
+    _Alignas(16)          // needed for opaque type alias
+    int64_t rtid;         // runtime id
+    int count;            // current wait count
+    struct colist queue;  // coroutine doubly linked list
 };
 
 static_assert(sizeof(neco_waitgroup) >= sizeof(struct neco_waitgroup), "");
+static_assert(_Alignof(neco_waitgroup) == _Alignof(struct neco_waitgroup), "");
 
 inline
 static int check_waitgroup(struct neco_waitgroup *wg) {
@@ -7461,11 +7487,13 @@ int neco_waitgroup_destroy(neco_waitgroup *waitgroup) {
 }
 
 struct neco_cond {
-    int64_t rtid;             // runtime id
-    struct colist queue;      // coroutine doubly linked list
+    _Alignas(16)         // needed for opaque type alias
+    int64_t rtid;        // runtime id
+    struct colist queue; // coroutine doubly linked list
 };
 
 static_assert(sizeof(neco_cond) >= sizeof(struct neco_cond), "");
+static_assert(_Alignof(neco_cond) == _Alignof(struct neco_cond), "");
 
 static int cond_init0(struct neco_cond *cv) {
     memset(cv, 0, sizeof(struct neco_cond));
@@ -8686,6 +8714,7 @@ static void iowork(void *udata) {
 #endif
 
 static int workfn(int64_t pin, void(*work)(void *udata), void *udata) {
+    (void)pin;
     struct coroutine *co = coself();
     if (!work) {
         return NECO_INVAL;
