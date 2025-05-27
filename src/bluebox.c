@@ -744,7 +744,7 @@ static void unixsocket_listener(int argc, void *argv[]) {
     }
 }
 
-int main(int argc, char *argv[]) {
+int neco_main(int argc, char *argv[]) {
     int port = 9999;
     char *unixsocket = 0;
     for (int i = 1; i < argc; i++) {
